@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.example.irving.smartfridge;
+package com.example.irving.smartfridge.util;
 
 import android.content.Context;
 import android.graphics.ImageFormat;
@@ -41,8 +41,8 @@ import static android.content.Context.CAMERA_SERVICE;
 public class MyCamera {
     private static final String TAG = MyCamera.class.getSimpleName();
 
-    private static final int IMAGE_WIDTH = 320;
-    private static final int IMAGE_HEIGHT = 240;
+    private static final int IMAGE_WIDTH = 1280;
+    private static final int IMAGE_HEIGHT = 960;
     private static final int MAX_IMAGES = 1;
 
     private CameraDevice mCameraDevice;
@@ -75,7 +75,8 @@ public class MyCamera {
      */
     public void initializeCamera(Context context,
                                  Handler backgroundHandler,
-                                 ImageReader.OnImageAvailableListener imageAvailableListener) {
+                                 ImageReader.OnImageAvailableListener imageAvailableListener,
+                                 int select) {
         // Discover the camera instance
         CameraManager manager = (CameraManager) context.getSystemService(CAMERA_SERVICE);
         String[] camIds = {};
@@ -88,7 +89,12 @@ public class MyCamera {
             Log.d(TAG, "No cameras found");
             return;
         }
-        String id = camIds[0];
+        if (camIds.length < select + 1) {
+            Log.d(TAG, "Not enough cameras found");
+            return;
+        }
+
+        String id = camIds[select];
         Log.d(TAG, "Using camera id " + id);
 
         // Initialize the image processor

@@ -16,12 +16,10 @@ import android.widget.Toast;
 import com.example.irving.smartfridge.util.Buzzer;
 import com.example.irving.smartfridge.util.EasyDLClassify;
 import com.example.irving.smartfridge.util.ImageUtil;
-import com.example.irving.smartfridge.util.ItemChangeService;
-import com.example.irving.smartfridge.util.LightSwitch;
+import com.example.irving.smartfridge.util.ItemChangeService;;
 import com.example.irving.smartfridge.util.MyCamera;
 import com.google.android.things.pio.Gpio;
 import com.google.android.things.pio.GpioCallback;
-import com.google.android.things.pio.PeripheralManager;
 
 import net.bither.util.CompressTools;
 
@@ -96,7 +94,7 @@ public class TakeActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_put);
+        setContentView(R.layout.activity_take);
         Intent intent = getIntent();
         userId = intent.getIntExtra("userId", -1);
         imageView = findViewById(R.id.take_imageView);
@@ -137,37 +135,42 @@ public class TakeActivity extends Activity {
     @Override
     protected void onStop() {
         super.onStop();
+        MyApplication application = (MyApplication) getApplicationContext();
+        application.getLightSwitch().getGpio().unregisterGpioCallback(light_callback);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
         // free camera
         if(mCamera != null)
             mCamera.shutDown();
 
-        // free Gpio resource
-        if (mGpioLightSwitch!=null) try {
-            mGpioLightSwitch.close();
-        } catch (IOException e) {
-            Log.e(TAG, e.getMessage(), e);
-        }
     }
 
-    private void initGpio() throws IOException{
-        PeripheralManager service = PeripheralManager.getInstance();
-        buzzer = new Buzzer();
-        mGpioLightSwitch = new LightSwitch().getGpio();  // open with close mode, which take light off as an event
-        mGpioLightSwitch.registerGpioCallback(new GpioCallback() {
-            @Override
-            public boolean onGpioEdge(Gpio gpio) {
-                Log.d(TAG, "Button pushed");
-                // switch to PutActivity
-                buzzer.buzz();      // give user a signal
-                finish();   // return to MainActivity
-                return true;
-            }
+    private GpioCallback light_callback = new GpioCallback() {
+        @Override
+        public boolean onGpioEdge(Gpio gpio) {
+            Log.d(TAG, "light switch trapped");
+            // switch to PutActivity
+            buzzer.buzz();      // give user a signal
+            //finish();   // return to MainActivity
+            Intent intent = new Intent(TakeActivity.this, MainActivity.class);
+            startActivity(intent);
+            return true;
+        }
 
-            @Override
-            public void onGpioError(Gpio gpio, int error) {
-                Log.w(TAG, mGpioLightSwitch + ": Error event " + error );
-            }
-        });
+        @Override
+        public void onGpioError(Gpio gpio, int error) {
+            Log.w(TAG, mGpioLightSwitch + ": Error event " + error );
+        }
+    };
+
+    private void initGpio() throws IOException{
+        MyApplication application = (MyApplication) getApplicationContext();
+        buzzer = application.getBuzzer();
+        application.getLightSwitch().getGpio().registerGpioCallback(light_callback);
+
     }
 
     private ImageReader.OnImageAvailableListener mOnImageAvailableListener =

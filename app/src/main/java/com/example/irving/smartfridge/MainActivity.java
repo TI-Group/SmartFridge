@@ -22,7 +22,6 @@ import android.widget.Toast;
 
 import com.example.irving.smartfridge.util.Buzzer;
 import com.example.irving.smartfridge.util.ImageUtil;
-import com.example.irving.smartfridge.util.LightSwitch;
 import com.example.irving.smartfridge.util.Youtu;
 import com.google.android.things.pio.Gpio;
 import com.google.android.things.pio.GpioCallback;
@@ -79,19 +78,14 @@ public class MainActivity extends Activity{
     private Handler mCameraHandler;     // for running camera in background
     private HandlerThread mCameraThread;
 
-    private Gpio mGpioPut;
-    private Gpio mGpioTake;
-    private Gpio mGpioLightSwitch;
-    private LightSwitch lightSwitch;
-    private Buzzer buzzer;
-    private static final String GPIO_PUT = "BCM21";   // PIN_40
-    private static final String GPIO_TAKE = "BCM20";    // PIN_38
 
     private static String TAG = "myLog";
 
     // user id
     private int userId = -1;  // identify by camera
     private boolean photo_taken = false;
+
+    private Buzzer buzzer;
 
 
     public static final String APP_ID = "10136384";
@@ -133,7 +127,30 @@ public class MainActivity extends Activity{
 
         // take picture
         //takePhoto();
+        clock();
 
+    }
+
+    private void clock(){
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try{
+                    Thread.sleep(2000);
+                }catch (InterruptedException e){
+                    e.printStackTrace();
+                }
+                Message message = new Message();
+                message.what = NAP;
+                handler.sendMessage(message);
+            }
+        }).start();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        photo_taken = true;
         try {
             initGPIO();
 
@@ -141,45 +158,9 @@ public class MainActivity extends Activity{
             Log.e(TAG, "onStart: error when initialize gpio device");
             e.printStackTrace();
         }
-    }
-
-    @Override
-    protected void onStart() {
-        super.onStart();
-        photo_taken = false;
-        try {
-            re_init_gpio();
-        }catch (IOException e){
-            e.printStackTrace();
-        }
 
     }
 
-
-    private void re_init_gpio() throws IOException {
-        buzzer = new Buzzer();
-        lightSwitch = new LightSwitch();
-        mGpioLightSwitch = lightSwitch.getGpio();  // open with close mode, which take light off as an event
-        mGpioLightSwitch.registerGpioCallback(new GpioCallback() {
-            @Override
-            public boolean onGpioEdge(Gpio gpio) {
-                Log.d(TAG, "light on detected");
-                // switch to PutActivity
-                if(!photo_taken) {
-                    buzzer.buzz();      // give user a signal
-                    takePhoto();
-                    photo_taken = true;
-                }
-                return true;
-            }
-
-            @Override
-            public void onGpioError(Gpio gpio, int error) {
-                Log.w(TAG, mGpioLightSwitch + ": Error event " + error );
-            }
-        });
-
-    }
 
     private ImageReader.OnImageAvailableListener mOnImageAvailableListener =
             new ImageReader.OnImageAvailableListener() {
@@ -242,19 +223,6 @@ public class MainActivity extends Activity{
         // free camera
         if(mCamera != null)
             mCamera.shutDown();
-
-        // free Gpio resource
-        if (mGpioPut!=null) try {
-            mGpioPut.close();
-        } catch (IOException e) {
-            Log.e(TAG, e.getMessage(), e);
-        }
-
-        if (mGpioTake!=null) try {
-            mGpioTake.close();
-        } catch (IOException e) {
-            Log.e(TAG, e.getMessage(), e);
-        }
     }
 
     private void takePhoto(){
@@ -275,64 +243,84 @@ public class MainActivity extends Activity{
             }
         }
     }
-    
+
+    private GpioCallback put_callback = new GpioCallback() {
+        @Override
+        public boolean onGpioEdge(Gpio gpio) {
+            Log.d(TAG, "Button pushed");
+            // switch to PutActivity
+            Intent intent = new Intent(MainActivity.this, PutActivity.class);
+            intent.putExtra("userId", userId);
+
+            MyApplication application = (MyApplication) getApplicationContext();
+            application.getPut_button().getGpio().unregisterGpioCallback(put_callback);
+            application.getTake_button().getGpio().unregisterGpioCallback(take_callback);
+            application.getLightSwitch().getGpio().unregisterGpioCallback(light_callback);
+            startActivity(intent);
+            return true;
+        }
+
+        @Override
+        public void onGpioError(Gpio gpio, int error) {
+            Log.w(TAG, ": Error event " + error );
+        }
+    };
+
+    private GpioCallback take_callback = new GpioCallback() {
+        @Override
+        public boolean onGpioEdge(Gpio gpio) {
+            Log.d(TAG, "Button pushed");
+            // switch to TakeActivity
+            Intent intent = new Intent(MainActivity.this, TakeActivity.class);
+            intent.putExtra("userId", userId);
+
+            MyApplication application = (MyApplication) getApplicationContext();
+            application.getPut_button().getGpio().unregisterGpioCallback(put_callback);
+            application.getTake_button().getGpio().unregisterGpioCallback(take_callback);
+            application.getLightSwitch().getGpio().unregisterGpioCallback(light_callback);
+            startActivity(intent);
+            return true;
+        }
+
+        @Override
+        public void onGpioError(Gpio gpio, int error) {
+            Log.w(TAG, "Error event " + error );
+        }
+    };
+
+    private GpioCallback light_callback = new GpioCallback() {
+        @Override
+        public boolean onGpioEdge(Gpio gpio) {
+            Log.d(TAG, "light on detected");
+            // switch to PutActivity
+            if(!photo_taken) {
+                buzzer.buzz();      // give user a signal
+                takePhoto();
+                photo_taken = true;
+            }
+            return true;
+        }
+
+        @Override
+        public void onGpioError(Gpio gpio, int error) {
+            Log.w(TAG, "Error event " + error );
+        }
+    };
 
     private void initGPIO() throws IOException{
+        MyApplication application = (MyApplication) getApplicationContext();
+        // put button
+        application.getPut_button().getGpio().registerGpioCallback(put_callback);
 
-        PeripheralManager service = PeripheralManager.getInstance();
-        if(mGpioPut != null){
-            mGpioPut.close();
-        }
-        mGpioPut = service.openGpio(GPIO_PUT);
-        if(mGpioTake != null){
-            mGpioTake.close();
-        }
-        mGpioTake = service.openGpio(GPIO_TAKE);
-
-        // set Direction
-        mGpioPut.setDirection(Gpio.DIRECTION_IN);
-        mGpioPut.setEdgeTriggerType(Gpio.EDGE_FALLING);
-        mGpioPut.registerGpioCallback(new GpioCallback() {
-            @Override
-            public boolean onGpioEdge(Gpio gpio) {
-                Log.d(TAG, "Button pushed");
-                // switch to PutActivity
-                Intent intent = new Intent(MainActivity.this, PutActivity.class);
-                intent.putExtra("userId", userId);
-                startActivity(intent);
-                return true;
-            }
-
-            @Override
-            public void onGpioError(Gpio gpio, int error) {
-                Log.w(TAG, mGpioPut + ": Error event " + error );
-            }
-        });
-
-        mGpioTake.setDirection(Gpio.DIRECTION_IN);
-        mGpioTake.setEdgeTriggerType(Gpio.EDGE_FALLING);
-        mGpioTake.registerGpioCallback(new GpioCallback() {
-            @Override
-            public boolean onGpioEdge(Gpio gpio) {
-                Log.d(TAG, "Button pushed");
-                // switch to TakeActivity
-                Intent intent = new Intent(MainActivity.this, TakeActivity.class);
-                intent.putExtra("userId", userId);
-                startActivity(intent);
-                return true;
-            }
-
-            @Override
-            public void onGpioError(Gpio gpio, int error) {
-                Log.w(TAG, mGpioTake + ": Error event " + error );
-            }
-        });
+        // take button
+        application.getTake_button().getGpio().registerGpioCallback(take_callback);
 
 
+        buzzer = application.getBuzzer();
+
+        application.getLightSwitch().getGpio().registerGpioCallback(light_callback);
 
     }
-
-
 
 
     private void uploadImg(final String path){
@@ -371,6 +359,7 @@ public class MainActivity extends Activity{
     private final static int UPLOAD_COMPLETE = 2;
     private final static int PHOTO_COMPRESSED = 1;
     private final static int IDENTIFY_FAILED = 3;
+    private final static int NAP = 4;
     private Handler handler = new Handler(){
         @Override
         public void handleMessage(Message msg) {
@@ -399,6 +388,10 @@ public class MainActivity extends Activity{
                     Bundle bundle = msg.getData();
                     String file_path = bundle.getString("path");
                     uploadImg(file_path);
+                    break;
+
+                case NAP:
+                    photo_taken = false;
                     break;
             }
         }

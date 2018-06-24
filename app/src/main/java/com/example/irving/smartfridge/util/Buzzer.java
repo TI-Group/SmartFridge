@@ -8,42 +8,16 @@ import com.google.android.things.pio.PeripheralManager;
 
 import java.io.IOException;
 
-public class Buzzer {
-    private static final String GPIO = "BCM26";  // PIN_37
-    private static Gpio mGpio;
-
+public class Buzzer extends GpioDevice{
+    private Gpio mGpio;
     private static final String TAG = "Buzzer";
 
-    public Buzzer() throws IOException{
-        if(mGpio == null)
-            initGpio();
-    }
-
-    public Gpio getGpio(){
-        if(mGpio != null)
-            return mGpio;
-        else{
-            initGpio();
-            return mGpio;
-        }
-    }
-
-    private void initGpio(){
-        try {
-            PeripheralManager service = PeripheralManager.getInstance();
-            mGpio = service.openGpio(GPIO);
-
-            // set Direction
-            mGpio.setDirection(Gpio.DIRECTION_OUT_INITIALLY_LOW);
-            mGpio.setActiveType(Gpio.ACTIVE_HIGH);
-        }catch (IOException e){
-            Log.e(TAG, "initGpio: open gpio error");
-            e.printStackTrace();
-        }
+    public Buzzer(String BCM) throws IOException{
+        PeripheralManager service = PeripheralManager.getInstance();
+        mGpio = service.openGpio(BCM);
     }
 
     public void buzz(){
-
         try {
             mGpio.setValue(true);
             Thread.sleep(500);

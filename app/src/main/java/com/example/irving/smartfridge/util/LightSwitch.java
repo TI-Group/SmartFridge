@@ -32,4 +32,8 @@ public class LightSwitch {
         mGpio.setEdgeTriggerType(Gpio.EDGE_RISING);
     }
 
+    private void setGpio(Gpio gpio){
+
+    }
+
 }

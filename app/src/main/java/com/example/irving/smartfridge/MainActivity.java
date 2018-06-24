@@ -13,13 +13,17 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.Message;
+import android.provider.MediaStore;
 import android.support.v4.content.ContextCompat;
 import android.util.Log;
 import android.widget.ImageView;
 import android.widget.Toast;
 
 import com.example.irving.smartfridge.util.Buzzer;
+import com.example.irving.smartfridge.util.ImageUtil;
 import com.example.irving.smartfridge.util.LightSwitch;
+import com.example.irving.smartfridge.util.Youtu;
 import com.google.android.things.pio.Gpio;
 import com.google.android.things.pio.GpioCallback;
 import com.google.android.things.pio.PeripheralManager;
@@ -39,8 +43,12 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 import com.example.irving.smartfridge.util.MyCamera;
-import com.youtu.Youtu;
 
+
+import net.bither.util.CompressTools;
+import net.bither.util.FileUtil;
+
+import org.apache.log4j.chainsaw.Main;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -74,7 +82,7 @@ public class MainActivity extends Activity{
     private Gpio mGpioPut;
     private Gpio mGpioTake;
     private Gpio mGpioLightSwitch;
-    private Gpio mGpioBuzzer;
+    private LightSwitch lightSwitch;
     private Buzzer buzzer;
     private static final String GPIO_PUT = "BCM21";   // PIN_40
     private static final String GPIO_TAKE = "BCM20";    // PIN_38
@@ -84,6 +92,12 @@ public class MainActivity extends Activity{
     // user id
     private int userId = -1;  // identify by camera
     private boolean photo_taken = false;
+
+
+    public static final String APP_ID = "10136384";
+    public static final String SECRET_ID = "AKID06ACILoIE6tsofBb6WrAQcjSFxeIKRuL";
+    public static final String SECRET_KEY = "Y4VuJuSxPl3XyKxdHsNqmmquwunO6lQS";
+    public static final String USER_ID = "1823997989";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -109,12 +123,6 @@ public class MainActivity extends Activity{
                 PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[] {Manifest.permission.READ_EXTERNAL_STORAGE}, 1);
         }
-
-        try{
-            initGPIO();
-        }catch (IOException e){
-            Log.w(TAG, "gpio went wrong when initializing");
-        }
         
         mCameraThread = new HandlerThread("CameraBackground");
         mCameraThread.start();
@@ -125,12 +133,52 @@ public class MainActivity extends Activity{
 
         // take picture
         //takePhoto();
+
+        try {
+            initGPIO();
+
+        }catch (IOException e){
+            Log.e(TAG, "onStart: error when initialize gpio device");
+            e.printStackTrace();
+        }
     }
 
     @Override
-    protected void onResume() {
-        super.onResume();
+    protected void onStart() {
+        super.onStart();
         photo_taken = false;
+        try {
+            re_init_gpio();
+        }catch (IOException e){
+            e.printStackTrace();
+        }
+
+    }
+
+
+    private void re_init_gpio() throws IOException {
+        buzzer = new Buzzer();
+        lightSwitch = new LightSwitch();
+        mGpioLightSwitch = lightSwitch.getGpio();  // open with close mode, which take light off as an event
+        mGpioLightSwitch.registerGpioCallback(new GpioCallback() {
+            @Override
+            public boolean onGpioEdge(Gpio gpio) {
+                Log.d(TAG, "light on detected");
+                // switch to PutActivity
+                if(!photo_taken) {
+                    buzzer.buzz();      // give user a signal
+                    takePhoto();
+                    photo_taken = true;
+                }
+                return true;
+            }
+
+            @Override
+            public void onGpioError(Gpio gpio, int error) {
+                Log.w(TAG, mGpioLightSwitch + ": Error event " + error );
+            }
+        });
+
     }
 
     private ImageReader.OnImageAvailableListener mOnImageAvailableListener =
@@ -157,21 +205,39 @@ public class MainActivity extends Activity{
                     imageView.setImageBitmap(BitmapFactory.decodeByteArray(imageBytes,0,imageBytes.length));
                 }
             });
-            File file = convertByteToFile(imageBytes);
-            int person_id = uploadImg(file);
-            if(person_id == -1){
-                Log.e(TAG, "onPictureTaken: upload image error");
-                return;
-            }else{
-                Log.d(TAG, "onPictureTaken: identify success");
-                buzzer.buzz();      // give user a hint that identify process success
-                userId = person_id; // replace userId with new identified person id
-            }
+            File file = ImageUtil.convertByteToFile(imageBytes, MainActivity.this.getCacheDir());
+            CompressTools.getInstance(this).compressToFile(file, new CompressTools.OnCompressListener() {
+                @Override
+                public void onStart() {
+                    Log.d(TAG, "onStart: start compress photo");
+                }
+
+                @Override
+                public void onFail(String error) {
+                    Log.d(TAG, "onFail: compress failed:" + error);
+                }
+
+                @Override
+                public void onSuccess(File file) {
+                    long new_size = file.length() / 1024;
+                    Log.d(TAG, "onSuccess: new File size: " + new_size);
+                    Message message = new Message();
+                    message.what = PHOTO_COMPRESSED;
+                    Bundle bundle = new Bundle();
+                    bundle.putString("path", file.getPath());
+                    message.setData(bundle);
+                    handler.sendMessage(message);
+                }
+            });
+            long size = file.length() / 1024;    // kB
+            Log.d(TAG, "onPictureTaken: Portrait Size: " + size);
+
         }
     }
 
+
     @Override
-    protected void onDestroy() {   // when switch to another activity
+    protected void onDestroy() {
         super.onDestroy();
         // free camera
         if(mCamera != null)
@@ -189,15 +255,8 @@ public class MainActivity extends Activity{
         } catch (IOException e) {
             Log.e(TAG, e.getMessage(), e);
         }
-
-        if (mGpioLightSwitch!=null) try {
-            mGpioLightSwitch.close();
-        } catch (IOException e) {
-            Log.e(TAG, e.getMessage(), e);
-        }
-
     }
-    
+
     private void takePhoto(){
         while (true){
             if(mCamera.isReady()){
@@ -221,7 +280,13 @@ public class MainActivity extends Activity{
     private void initGPIO() throws IOException{
 
         PeripheralManager service = PeripheralManager.getInstance();
+        if(mGpioPut != null){
+            mGpioPut.close();
+        }
         mGpioPut = service.openGpio(GPIO_PUT);
+        if(mGpioTake != null){
+            mGpioTake.close();
+        }
         mGpioTake = service.openGpio(GPIO_TAKE);
 
         // set Direction
@@ -263,69 +328,79 @@ public class MainActivity extends Activity{
             }
         });
 
-        // new hardware
-        buzzer = new Buzzer();
-        mGpioBuzzer = buzzer.getGpio();
-        mGpioLightSwitch = new LightSwitch().getGpio();  // open with close mode, which take light on as an event
 
-        mGpioLightSwitch.registerGpioCallback(new GpioCallback() {
+
+    }
+
+
+
+
+    private void uploadImg(final String path){
+        new Thread(new Runnable() {
             @Override
-            public boolean onGpioEdge(Gpio gpio) {
-                Log.d(TAG, "light on detected");
-                // switch to PutActivity
-                if(!photo_taken) {
-                    buzzer.buzz();      // give user a signal
-                    takePhoto();
-                    photo_taken = true;
+            public void run() {
+                MyApplication application = (MyApplication) getApplicationContext();
+                Youtu faceYoutu = new Youtu(APP_ID, SECRET_ID, SECRET_KEY, Youtu.API_YOUTU_END_POINT);
+                String fridge_id = application.getFridge_id();
+                try {
+                    Bitmap bitmap = BitmapFactory.decodeFile(path);
+                    JSONObject response = faceYoutu.FaceIdentify(bitmap, fridge_id);
+                    JSONArray array = (JSONArray) response.get("candidates");
+                    if(array.length() == 0){    // identify failed, restart
+                        Message message = new Message();
+                        message.what = IDENTIFY_FAILED;
+                        handler.sendMessage(message);
+                        return;
+                    }
+                    JSONObject json = (JSONObject) array.get(0);
+                    String person_id = (String)json.get("person_id");
+                    int user_id = Integer.parseInt(person_id);
+                    Message message = new Message();
+                    message.what = UPLOAD_COMPLETE;
+                    message.arg1 = user_id;
+                    handler.sendMessage(message);
+                }catch (Exception e){
+                    Log.e(TAG, "uploadImg: error when upload image");
+                    e.printStackTrace();
                 }
-                return true;
             }
+        }).start();
 
-            @Override
-            public void onGpioError(Gpio gpio, int error) {
-                Log.w(TAG, mGpioLightSwitch + ": Error event " + error );
+    }
+
+    private final static int UPLOAD_COMPLETE = 2;
+    private final static int PHOTO_COMPRESSED = 1;
+    private final static int IDENTIFY_FAILED = 3;
+    private Handler handler = new Handler(){
+        @Override
+        public void handleMessage(Message msg) {
+            switch (msg.what){
+                case IDENTIFY_FAILED:
+                    Toast.makeText(MainActivity.this, "人脸检测失败", Toast.LENGTH_SHORT).show();
+                    buzzer.buzz();  // buzz 2 times means failed
+                    buzzer.buzz();
+                    takePhoto();        // restart process
+                    break;
+
+                case UPLOAD_COMPLETE:
+                    int person_id = msg.arg1;
+                    if(person_id == -1){
+                        Log.e(TAG, "onPictureTaken: upload image error");
+                        return;
+                    }else{
+                        Log.d(TAG, "onPictureTaken: identify success, person_id:"+ person_id);
+                        Toast.makeText(MainActivity.this, "人脸识别成功，当前用户id:" + person_id, Toast.LENGTH_SHORT).show();
+                        buzzer.buzz();      // give user a hint that identify process success
+                        userId = person_id; // replace userId with new identified person id
+                    }
+                    break;
+
+                case PHOTO_COMPRESSED:
+                    Bundle bundle = msg.getData();
+                    String file_path = bundle.getString("path");
+                    uploadImg(file_path);
+                    break;
             }
-        });
-
-
-    }
-
-
-    private File convertByteToFile(byte[] imageByte) {
-        File f = null;
-        try {
-            // create a file to write bitmap data
-            f = new File(MainActivity.this.getCacheDir(), "photo");
-            if(f.exists())
-                f.delete();
-            f.createNewFile();
-
-            // write the bytes in file
-            FileOutputStream fos = new FileOutputStream(f);
-            fos.write(imageByte);
-            fos.flush();
-            fos.close();
-        } catch (Exception e) {
-            Log.e(TAG, "error when create file");
         }
-        return f;
-    }
-
-    private int uploadImg(File file){
-        String path = file.getPath();
-        MyApplication application = (MyApplication) getApplicationContext();
-        Youtu faceYoutu = application.getFaceYoutu();
-        String fridge_id = application.getFridge_id();
-        try {
-            JSONObject response = faceYoutu.FaceIdentify(path, fridge_id);
-            JSONArray array = (JSONArray) response.get("candidates");
-            JSONObject json = (JSONObject) array.get(0);
-            String person_id = (String)json.get("person_id");
-            return Integer.getInteger(person_id);
-        }catch (Exception e){
-            Log.e(TAG, "uploadImg: error when upload image");
-            e.printStackTrace();
-            return -1;
-        }
-    }
+    };
 }

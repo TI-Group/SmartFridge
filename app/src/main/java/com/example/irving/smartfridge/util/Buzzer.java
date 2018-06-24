@@ -15,7 +15,8 @@ public class Buzzer {
     private static final String TAG = "Buzzer";
 
     public Buzzer() throws IOException{
-        initGpio();
+        if(mGpio == null)
+            initGpio();
     }
 
     public Gpio getGpio(){

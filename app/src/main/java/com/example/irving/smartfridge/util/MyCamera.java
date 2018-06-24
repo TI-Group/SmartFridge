@@ -41,8 +41,8 @@ import static android.content.Context.CAMERA_SERVICE;
 public class MyCamera {
     private static final String TAG = MyCamera.class.getSimpleName();
 
-    private static final int IMAGE_WIDTH = 1280;
-    private static final int IMAGE_HEIGHT = 960;
+    private static final int IMAGE_WIDTH = 640;
+    private static final int IMAGE_HEIGHT = 480;
     private static final int MAX_IMAGES = 1;
 
     private CameraDevice mCameraDevice;

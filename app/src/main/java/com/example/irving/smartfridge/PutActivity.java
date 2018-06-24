@@ -11,15 +11,19 @@ import android.os.HandlerThread;
 import android.os.Message;
 import android.util.Log;
 import android.widget.ImageView;
+import android.widget.Toast;
 
 import com.example.irving.smartfridge.util.Buzzer;
 import com.example.irving.smartfridge.util.EasyDLClassify;
+import com.example.irving.smartfridge.util.ImageUtil;
 import com.example.irving.smartfridge.util.ItemChangeService;
 import com.example.irving.smartfridge.util.LightSwitch;
 import com.example.irving.smartfridge.util.MyCamera;
 import com.google.android.things.pio.Gpio;
 import com.google.android.things.pio.GpioCallback;
 import com.google.android.things.pio.PeripheralManager;
+
+import net.bither.util.CompressTools;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -63,6 +67,7 @@ public class PutActivity extends Activity {
     private Gpio mGpioLightSwitch;
 
     private static final int IDEN_RETURN = 0;
+    private static final int NAP = 1;   // take a nap when first come in and let UI finish first
     private Handler identifyHandler = new Handler(){
         @Override
         public void handleMessage(Message msg) {
@@ -72,15 +77,19 @@ public class PutActivity extends Activity {
                     String item_name = bundle.getString("item_name");
                     if(item_name.equals("")){
                         Log.e(TAG, "onHandle: upload image error");
-                    }else if(item_name.equals("other")){
+                    }else if(item_name.equals("[default]")){
                         Log.d(TAG, "onHandle: somthing cannot identify");
                     }
                     else{
                         Log.d(TAG, "onHandle: identify success");
                         buzzer.buzz();      // give user a hint that identify process success
+                        Toast.makeText(PutActivity.this, "识别成功："+item_name, Toast.LENGTH_SHORT).show();
                         onItemIdentified(item_name);
-                        takePhoto();
                     }
+                    takePhoto();
+                    break;
+                case NAP:
+                    takePhoto();
             }
         }
     };
@@ -106,27 +115,36 @@ public class PutActivity extends Activity {
         }
         buzzer.buzz();  // good to begin putting food
         // go into a loop which endless take a photo and identify it
-        takePhoto();
+        nap();
+    }
+
+    private void nap(){
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Thread.sleep(1000);
+                }catch (InterruptedException e){
+
+                }
+                Message message = new Message();
+                message.what = NAP;
+                identifyHandler.sendMessage(message);
+            }
+        }).start();
     }
 
 
     @Override
-    protected void onStop() {
-        super.onStop();
+    protected void onDestroy() {
+        super.onDestroy();
         // free camera
         if(mCamera != null)
             mCamera.shutDown();
 
-        // free Gpio resource
-        if (mGpioLightSwitch!=null) try {
-            mGpioLightSwitch.close();
-        } catch (IOException e) {
-            Log.e(TAG, e.getMessage(), e);
-        }
     }
 
     private void initGpio() throws IOException{
-        PeripheralManager service = PeripheralManager.getInstance();
         buzzer = new Buzzer();
         mGpioLightSwitch = new LightSwitch().getGpio();  // open with close mode, which take light off as an event
         mGpioLightSwitch.registerGpioCallback(new GpioCallback() {
@@ -170,8 +188,28 @@ public class PutActivity extends Activity {
                     imageView.setImageBitmap(BitmapFactory.decodeByteArray(imageBytes,0,imageBytes.length));
                 }
             });
-            File file = convertByteToFile(imageBytes);
-            identify(file);
+            File file = ImageUtil.convertByteToFile(imageBytes, PutActivity.this.getCacheDir());
+            CompressTools.getInstance(this).compressToFile(file, new CompressTools.OnCompressListener() {
+                @Override
+                public void onStart() {
+                    Log.d(TAG, "onStart: start compress photo");
+                }
+
+                @Override
+                public void onFail(String error) {
+                    Log.d(TAG, "onFail: compress failed:" + error);
+                }
+
+                @Override
+                public void onSuccess(File file) {
+                    long new_size = file.length() / 1024;
+                    Log.d(TAG, "onSuccess: new File size: " + new_size);
+                    identify(file); // try to identify the food after photo has been compressed
+                }
+            });
+            long size = file.length() / 1024;    // kB
+            Log.d(TAG, "onPictureTaken: Portrait Size: " + size);
+
 
 
         }
@@ -184,7 +222,14 @@ public class PutActivity extends Activity {
             public void run() {
                 MyApplication application = (MyApplication) getApplicationContext();
                 String fridge_id = application.getFridge_id();
-                String result = ItemChangeService.putRequest(item_name, fridge_id);
+                final String result = ItemChangeService.putRequest(item_name, fridge_id);
+
+                runOnUiThread(new Runnable(){
+                    @Override
+                    public void run() {
+                        Toast.makeText(PutActivity.this, item_name +"上传"+result, Toast.LENGTH_SHORT).show();
+                    }
+                });
                 Log.d(TAG, "onItemIdentified: " + result);
             }
         }).start();
@@ -214,25 +259,6 @@ public class PutActivity extends Activity {
         }).start();
     }
 
-    private File convertByteToFile(byte[] imageByte) {
-        File f = null;
-        try {
-            // create a file to write bitmap data
-            f = new File(PutActivity.this.getCacheDir(), "photo");
-            if(f.exists())
-                f.delete();
-            f.createNewFile();
-
-            // write the bytes in file
-            FileOutputStream fos = new FileOutputStream(f);
-            fos.write(imageByte);
-            fos.flush();
-            fos.close();
-        } catch (Exception e) {
-            Log.e(TAG, "error when create file");
-        }
-        return f;
-    }
 
     private void takePhoto(){
         while (true){

@@ -1,6 +1,9 @@
 package com.example.irving.smartfridge;
 
 import android.app.Activity;
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.BitmapFactory;
 import android.media.Image;
@@ -18,6 +21,7 @@ import com.example.irving.smartfridge.util.EasyDLClassify;
 import com.example.irving.smartfridge.util.ImageUtil;
 import com.example.irving.smartfridge.util.ItemChangeService;
 import com.example.irving.smartfridge.util.MyCamera;
+import com.example.irving.smartfridge.widget.CustomStatusView;
 import com.google.android.things.pio.Gpio;
 import com.google.android.things.pio.GpioCallback;
 
@@ -53,8 +57,8 @@ public class PutActivity extends Activity {
     private final static String TAG = "PutActivity";
     private int userId;
 
-
     private ImageView imageView;
+    private boolean finishMark = false;
 
     private MyCamera mCamera;
     private Handler mCameraHandler;     // for running camera in background
@@ -62,6 +66,7 @@ public class PutActivity extends Activity {
 
     private Buzzer buzzer;
     private Gpio mGpioLightSwitch;
+    private CustomStatusView statusView;
 
     private static final int IDEN_RETURN = 0;
     private static final int NAP = 1;   // take a nap when first come in and let UI finish first
@@ -78,6 +83,7 @@ public class PutActivity extends Activity {
                         Log.d(TAG, "onHandle: somthing cannot identify");
                     }
                     else{
+                        statusView.loadSuccess();
                         Log.d(TAG, "onHandle: identify success");
                         buzzer.buzz();      // give user a hint that identify process success
                         Toast.makeText(PutActivity.this, "识别成功："+item_name, Toast.LENGTH_SHORT).show();
@@ -98,6 +104,8 @@ public class PutActivity extends Activity {
         Intent intent = getIntent();
         userId = intent.getIntExtra("userId", -1);
         imageView = findViewById(R.id.put_imageView);
+        finishMark = false;
+        statusView = findViewById(R.id.as_status);
 
         mCameraThread = new HandlerThread("CameraBackground");
         mCameraThread.start();
@@ -149,8 +157,7 @@ public class PutActivity extends Activity {
             MyApplication application = (MyApplication) getApplicationContext();
             application.getLightSwitch().getGpio().unregisterGpioCallback(light_callback);
             //finish();   // return to MainActivity
-            Intent intent = new Intent(PutActivity.this, MainActivity.class);
-            startActivity(intent);
+            finishMark = true;
             return true;
         }
 
@@ -251,12 +258,21 @@ public class PutActivity extends Activity {
 
                     // Handler
                     Message message = new Message();
+                    message.what = IDEN_RETURN;
                     Bundle bundle = new Bundle();
                     bundle.putString("item_name", result_name);
                     message.setData(bundle);
                     identifyHandler.sendMessage(message);
                 }catch (Exception e){
                     e.printStackTrace();
+
+                    // Handler
+                    Message message = new Message();
+                    message.what = IDEN_RETURN;
+                    Bundle bundle = new Bundle();
+                    bundle.putString("item_name", "[default]");
+                    message.setData(bundle);
+                    identifyHandler.sendMessage(message);
                 }
             }
         }).start();
@@ -264,18 +280,24 @@ public class PutActivity extends Activity {
 
 
     private void takePhoto(){
-        while (true){
-            if(mCamera.isReady()){
+        if(finishMark)
+        {
+            Log.d(TAG, "PutActivity: prepare to quit...");
+            Intent intent = new Intent(PutActivity.this, MainActivity.class);
+            startActivity(intent);
+            return;
+        }
+        while(true) {
+            if (mCamera.isReady()) {
                 Log.d(TAG, "camera is ready.");
                 mCamera.takePicture();
                 Log.d(TAG, "take photo success");
                 break;
-            }
-            else {
+            } else {
                 Log.d(TAG, "camera is not ready.");
                 try {
                     Thread.sleep(100);
-                }catch (InterruptedException e){
+                } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
             }

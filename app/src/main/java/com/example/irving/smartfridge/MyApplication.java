@@ -24,7 +24,7 @@ public class MyApplication extends Application {
     private static GpioDevice take_button;
 
     // Fridge
-    private static final String fridge_id = "fridge1";
+    private static final String fridge_id = "fridge2";
     @Override
     public void onCreate() {
         super.onCreate();

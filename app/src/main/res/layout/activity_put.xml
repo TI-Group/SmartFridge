@@ -5,9 +5,22 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     tools:context=".PutActivity">
-    <ImageView
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:id="@+id/put_imageView"/>
+        android:layout_height="match_parent">
+        <ImageView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:id="@+id/put_imageView"/>
+        <com.example.irving.smartfridge.widget.CustomStatusView
+            android:id="@+id/as_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:padding="3dp"
+            app:progress_radius="50dp"
+            app:progress_width="6dp" />
+    </FrameLayout>
+
 
 </android.support.constraint.ConstraintLayout>

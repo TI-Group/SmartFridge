@@ -17,12 +17,15 @@ import android.os.Message;
 import android.provider.MediaStore;
 import android.support.v4.content.ContextCompat;
 import android.util.Log;
+import android.view.View;
 import android.widget.ImageView;
+import android.widget.RelativeLayout;
 import android.widget.Toast;
 
 import com.example.irving.smartfridge.util.Buzzer;
 import com.example.irving.smartfridge.util.ImageUtil;
 import com.example.irving.smartfridge.util.Youtu;
+import com.example.irving.smartfridge.widget.CustomStatusView;
 import com.google.android.things.pio.Gpio;
 import com.google.android.things.pio.GpioCallback;
 import com.google.android.things.pio.PeripheralManager;
@@ -93,6 +96,9 @@ public class MainActivity extends Activity{
     public static final String SECRET_KEY = "Y4VuJuSxPl3XyKxdHsNqmmquwunO6lQS";
     public static final String USER_ID = "1823997989";
 
+    private RelativeLayout mWaiting;
+    private CustomStatusView statusView;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -100,6 +106,9 @@ public class MainActivity extends Activity{
         setContentView(R.layout.activity_main);
 
         imageView = findViewById(R.id.photo);
+        mWaiting = findViewById(R.id.waiting);
+        statusView = findViewById(R.id.as_status);
+
         // check permission
         if(ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) !=
                 PackageManager.PERMISSION_GRANTED) {
@@ -117,7 +126,7 @@ public class MainActivity extends Activity{
                 PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[] {Manifest.permission.READ_EXTERNAL_STORAGE}, 1);
         }
-        
+
         mCameraThread = new HandlerThread("CameraBackground");
         mCameraThread.start();
         mCameraHandler = new Handler(mCameraThread.getLooper());
@@ -294,6 +303,7 @@ public class MainActivity extends Activity{
             Log.d(TAG, "light on detected");
             // switch to PutActivity
             if(!photo_taken) {
+                mWaiting.setVisibility(View.GONE);
                 buzzer.buzz();      // give user a signal
                 takePhoto();
                 photo_taken = true;
@@ -335,12 +345,20 @@ public class MainActivity extends Activity{
                     JSONObject response = faceYoutu.FaceIdentify(bitmap, fridge_id);
                     JSONArray array = (JSONArray) response.get("candidates");
                     if(array.length() == 0){    // identify failed, restart
+                        //response = faceYoutu.GetPersonIds(fridge_id);
                         Message message = new Message();
                         message.what = IDENTIFY_FAILED;
                         handler.sendMessage(message);
                         return;
                     }
                     JSONObject json = (JSONObject) array.get(0);
+                    if((double)json.get("confidence") < 70)
+                    {
+                        Message message = new Message();
+                        message.what = IDENTIFY_FAILED;
+                        handler.sendMessage(message);
+                        return;
+                    }
                     String person_id = (String)json.get("person_id");
                     int user_id = Integer.parseInt(person_id);
                     Message message = new Message();
@@ -365,7 +383,8 @@ public class MainActivity extends Activity{
         public void handleMessage(Message msg) {
             switch (msg.what){
                 case IDENTIFY_FAILED:
-                    Toast.makeText(MainActivity.this, "人脸检测失败", Toast.LENGTH_SHORT).show();
+                    statusView.loadFailure();
+                    Toast.makeText(MainActivity.this, "人脸识别失败", Toast.LENGTH_SHORT).show();
                     buzzer.buzz();  // buzz 2 times means failed
                     buzzer.buzz();
                     takePhoto();        // restart process
@@ -378,9 +397,10 @@ public class MainActivity extends Activity{
                         return;
                     }else{
                         Log.d(TAG, "onPictureTaken: identify success, person_id:"+ person_id);
-                        Toast.makeText(MainActivity.this, "人脸识别成功，当前用户id:" + person_id, Toast.LENGTH_SHORT).show();
+                        statusView.loadSuccess();
                         buzzer.buzz();      // give user a hint that identify process success
                         userId = person_id; // replace userId with new identified person id
+                        Toast.makeText(MainActivity.this, "人脸识别成功，当前用户id:" + person_id + "\n请选择放入模式或者拿出模式", Toast.LENGTH_LONG).show();
                     }
                     break;
 
